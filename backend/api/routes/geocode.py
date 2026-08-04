@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 import httpx
 
 router = APIRouter(prefix="/api/v1/geocode", tags=["geocode"])
@@ -18,7 +18,7 @@ def place_tier(result: dict) -> int:
     return PLACE_TIER_MAP.get(place_type, 4)
 
 @router.get("")
-async def geocode(q: str, limit: int = 8):
+async def geocode(q: str = Query(..., min_length=2, max_length=100), limit: int = Query(8, ge=1, le=50)):
     if not q or len(q.strip()) < 2:
         return {"results": []}
     
