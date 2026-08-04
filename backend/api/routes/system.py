@@ -89,7 +89,7 @@ async def trigger_sync(_user=Depends(get_current_user)):
 
 @router.get("/insights")
 async def get_insights(
-    region_id: str = Query(...),
+    region_id: str = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user)
 ):
@@ -115,7 +115,7 @@ async def get_insights(
 
 @router.post("/intelligence-cycle")
 async def trigger_intelligence_cycle(
-    region_id: str = Query(None),
+    region_id: str = Query(None, min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     _user=Depends(get_current_user)
 ):
     try:
@@ -219,7 +219,7 @@ async def get_intelligence_status(db: Session = Depends(get_db)):
 
 
 @router.get("/regions/search")
-async def search_regions(q: str):
+async def search_regions(q: str = Query(..., min_length=1, max_length=100)):
     data_dir = os.getenv("RAPHAEL_DATA_DIR")
     if not data_dir:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
