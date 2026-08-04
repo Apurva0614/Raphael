@@ -6,7 +6,7 @@ from db.connection import get_db
 router = APIRouter()
 
 @router.get("")
-async def get_anomalies(days: int = Query(7), db: Session = Depends(get_db)):
+async def get_anomalies(days: int = Query(7, ge=1, le=365), db: Session = Depends(get_db)):
     rows = db.execute(text("""
         SELECT id, layer_type, value, unit, station_name, observed_at, anomaly_score
         FROM raw_observations

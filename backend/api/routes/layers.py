@@ -106,7 +106,7 @@ async def get_layer_history(
 async def get_layer_forecast(
     layer_type: str,
     zone_id:    str = Query(...),
-    hours:      int = Query(48),
+    hours:      int = Query(48, ge=1, le=168),
     db: Session = Depends(get_db),
     _user = Depends(get_current_user)
 ):
