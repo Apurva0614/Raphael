@@ -19,7 +19,7 @@ VALID_LAYERS = ["aq", "lst", "ndvi", "fire", "precipitation",
 async def get_layer_current(
     layer_type: str,
     region_id:  str   = Query(...),
-    bbox:       str   = Query(...),   # "west,south,east,north"
+    bbox:       str   = Query(..., pattern=r"^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$"),   # "west,south,east,north"
     db:         Session = Depends(get_db),
     _user = Depends(get_current_user)
 ):
@@ -82,7 +82,7 @@ async def get_layer_current(
 async def get_layer_history(
     layer_type: str,
     region_id:  str,
-    location:   str = Query(...),   # "lat,lon"
+    location:   str   = Query(..., pattern=r"^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$"),   # "lat,lon"
     from_date:  str = Query(...),
     to_date:    str = Query(...),
     db: Session = Depends(get_db),
