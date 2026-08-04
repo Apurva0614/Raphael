@@ -18,7 +18,7 @@ VALID_LAYERS = ["aq", "lst", "ndvi", "fire", "precipitation",
 @router.get("/{layer_type}/current")
 async def get_layer_current(
     layer_type: str,
-    region_id:  str   = Query(...),
+    region_id:  str   = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     bbox:       str   = Query(..., pattern=r"^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$"),   # "west,south,east,north"
     db:         Session = Depends(get_db),
     _user = Depends(get_current_user)
@@ -81,7 +81,7 @@ async def get_layer_current(
 @router.get("/{layer_type}/history")
 async def get_layer_history(
     layer_type: str,
-    region_id:  str,
+    region_id:  str   = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     location:   str   = Query(..., pattern=r"^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$"),   # "lat,lon"
     from_date:  str = Query(...),
     to_date:    str = Query(...),
@@ -120,7 +120,7 @@ async def get_layer_history(
 @router.get("/{layer_type}/forecast")
 async def get_layer_forecast(
     layer_type: str,
-    zone_id:    str = Query(...),
+    zone_id:    str = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     hours:      int = Query(48, ge=1, le=168),
     db: Session = Depends(get_db),
     _user = Depends(get_current_user)
@@ -194,7 +194,7 @@ async def get_layer_forecast(
 @router.get("/{layer_type}/tile")
 async def get_raster_tile(
     layer_type: str,
-    region_id:  str = Query(...),
+    region_id:  str = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     thumbnail:  bool = Query(False),
     db: Session = Depends(get_db)
 ):
@@ -254,7 +254,7 @@ async def get_raster_tile(
 @router.get("/{layer_type}/tile-bounds")
 async def get_tile_bounds(
     layer_type: str,
-    region_id:  str = Query(...),
+    region_id:  str = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     db: Session = Depends(get_db)
 ):
     """
@@ -306,7 +306,7 @@ async def get_tile_bounds(
 
 @router.get("/composite/risk")
 async def get_risk_scores(
-    region_id: str = Query(...),
+    region_id: str = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     db: Session = Depends(get_db),
     _user = Depends(get_current_user)
 ):

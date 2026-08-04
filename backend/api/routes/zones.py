@@ -190,8 +190,8 @@ def _enrich_zone(z: ZoneGeometry, db: Session) -> dict:
 
 @router.get("/")
 async def list_zones(
-    region_id: str = Query(...),
-    format: str = Query(None),
+    region_id: str = Query(..., min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
+    format: str = Query(None, pattern=r"^(geojson)?$"),
     db: Session = Depends(get_db),
     _user = Depends(get_current_user)
 ):
