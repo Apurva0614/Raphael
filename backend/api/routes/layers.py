@@ -88,6 +88,21 @@ async def get_layer_history(
     db: Session = Depends(get_db),
     _user = Depends(get_current_user)
 ):
+    from fastapi import HTTPException
+    import datetime
+
+    try:
+        fd = datetime.datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+        td = datetime.datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Dates must be in ISO 8601 format.")
+
+    if fd > td:
+        raise HTTPException(status_code=400, detail="from_date must be before or equal to to_date.")
+
+    if (td - fd).days > 365:
+        raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days.")
+
     # Stub response matching specification envelope
     return {
         "status": "success",
