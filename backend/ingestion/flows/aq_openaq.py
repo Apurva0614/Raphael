@@ -26,9 +26,9 @@ def fetch_locations(bbox: tuple) -> list:
     data = flow_obj.fetch(
         f"{BASE_URL}/locations",
         params={
-            "bbox":       f"{west},{south},{east},{north}",
-            "limit":      1000,
-            "parameters": "pm25,pm10,no2,o3,co"
+            "bbox":          f"{west},{south},{east},{north}",
+            "limit":         1000,
+            "parameters_id": "1,2,7,8,10"
         },
         headers=headers
     )
@@ -53,6 +53,9 @@ def write_to_db(locations: list, flow_obj: OpenAQFlow):
             latest = sensor.get("latest", {})
             if not latest.get("value"):
                 continue
+            raw_data = dict(latest)
+            raw_data["lat"] = loc["coordinates"]["latitude"]
+            raw_data["lon"] = loc["coordinates"]["longitude"]
             observations.append({
                 "id":           uuid.uuid4(),
                 "source_id":    flow_obj.source.id,
@@ -69,7 +72,7 @@ def write_to_db(locations: list, flow_obj: OpenAQFlow):
                 "observed_at":  datetime.fromisoformat(
                                     latest["datetime"].replace("Z", "+00:00")
                                 ) if latest.get("datetime") else datetime.now(timezone.utc),
-                "raw_payload":  latest
+                "raw_payload":  raw_data
             })
     flow_obj.bulk_write(observations)
     flow_obj.update_source_sync_time()
