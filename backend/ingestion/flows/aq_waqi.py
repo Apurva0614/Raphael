@@ -22,6 +22,62 @@ class WAQIFlow(BaseIngestionFlow):
 @task(name="fetch-waqi-stations", retries=3)
 def fetch_waqi_stations(bbox: tuple) -> list:
     flow_obj = WAQIFlow()
+    
+    west, south, east, north = bbox
+    lat_c = (south + north) / 2
+    lon_c = (west + east) / 2
+
+    mock_fallback = [
+        {
+            "uid": 2001,
+            "aqi": "152",
+            "lat": lat_c + 0.0337,
+            "lon": lon_c + 0.1068,
+            "station": {"name": f"Station Alpha, {flow_obj.region.name if flow_obj.region else 'Default'} - Station"}
+        },
+        {
+            "uid": 2002,
+            "aqi": "122",
+            "lat": lat_c - 0.0479,
+            "lon": lon_c - 0.0340,
+            "station": {"name": f"Station Beta, {flow_obj.region.name if flow_obj.region else 'Default'} - Station"}
+        },
+        {
+            "uid": 2003,
+            "aqi": "104",
+            "lat": lat_c + 0.0202,
+            "lon": lon_c - 0.0085,
+            "station": {"name": f"Station Gamma, {flow_obj.region.name if flow_obj.region else 'Default'} - Station"}
+        },
+        {
+            "uid": 2004,
+            "aqi": "138",
+            "lat": lat_c + 0.0541,
+            "lon": lon_c - 0.0845,
+            "station": {"name": f"Station Delta, {flow_obj.region.name if flow_obj.region else 'Default'} - Station"}
+        },
+        {
+            "uid": 2005,
+            "aqi": "131",
+            "lat": lat_c + 0.0145,
+            "lon": lon_c + 0.0320,
+            "station": {"name": f"Station Epsilon, {flow_obj.region.name if flow_obj.region else 'Default'} - Station"}
+        }
+    ]
+
+    clean_key = API_KEY.split('#')[0].strip() if API_KEY else ""
+    if not clean_key or "register at" in clean_key:
+        print(f"No WAQI API key configured or placeholder key found. Generating high-fidelity mock {flow_obj.region.name if flow_obj.region else 'Default'} stations.")
+        asyncio.run(broadcast({
+            "type": "trace",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": {
+                "source": "waqi",
+                "message": f"No WAQI API Key configured or placeholder key found. Generating high-fidelity mock {flow_obj.region.name if flow_obj.region else 'Default'} stations."
+            }
+        }))
+        return mock_fallback
+
     if not flow_obj.is_online():
         print("Offline - skipping fetch")
         asyncio.run(broadcast({
@@ -33,61 +89,6 @@ def fetch_waqi_stations(bbox: tuple) -> list:
             }
         }))
         return []
-
-    west, south, east, north = bbox
-    lat_c = (south + north) / 2
-    lon_c = (west + east) / 2
-
-    mock_fallback = [
-        {
-            "uid": 2001,
-            "aqi": "152",
-            "lat": lat_c + 0.0337,
-            "lon": lon_c + 0.1068,
-            "station": {"name": f"Anand Vihar, {flow_obj.region.name if flow_obj.region else 'Delhi'} - Station"}
-        },
-        {
-            "uid": 2002,
-            "aqi": "122",
-            "lat": lat_c - 0.0479,
-            "lon": lon_c - 0.0340,
-            "station": {"name": f"RK Puram, {flow_obj.region.name if flow_obj.region else 'Delhi'} - Station"}
-        },
-        {
-            "uid": 2003,
-            "aqi": "104",
-            "lat": lat_c + 0.0202,
-            "lon": lon_c - 0.0085,
-            "station": {"name": f"Mandir Marg, {flow_obj.region.name if flow_obj.region else 'Delhi'} - Station"}
-        },
-        {
-            "uid": 2004,
-            "aqi": "138",
-            "lat": lat_c + 0.0541,
-            "lon": lon_c - 0.0845,
-            "station": {"name": f"Punjabi Bagh, {flow_obj.region.name if flow_obj.region else 'Delhi'} - Station"}
-        },
-        {
-            "uid": 2005,
-            "aqi": "131",
-            "lat": lat_c + 0.0145,
-            "lon": lon_c + 0.0320,
-            "station": {"name": f"ITO, {flow_obj.region.name if flow_obj.region else 'Delhi'} - Station"}
-        }
-    ]
-
-    clean_key = API_KEY.split('#')[0].strip() if API_KEY else ""
-    if not clean_key or "register at" in clean_key:
-        print(f"No WAQI API key configured or placeholder key found. Generating high-fidelity mock {flow_obj.region.name if flow_obj.region else 'Delhi'} stations.")
-        asyncio.run(broadcast({
-            "type": "trace",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "payload": {
-                "source": "waqi",
-                "message": f"No WAQI API Key configured or placeholder key found. Generating high-fidelity mock {flow_obj.region.name if flow_obj.region else 'Delhi'} stations."
-            }
-        }))
-        return mock_fallback
 
     asyncio.run(broadcast({
         "type": "trace",
@@ -107,13 +108,13 @@ def fetch_waqi_stations(bbox: tuple) -> list:
             params={"latlng": f"{south},{west},{north},{east}", "token": clean_key}
         )
         if data.get("status") == "error" or not isinstance(data.get("data"), list):
-            print(f"WAQI API returned error: {data.get('data')}. Falling back to mock Delhi stations.")
+            print(f"WAQI API returned error: {data.get('data')}. Falling back to mock stations.")
             asyncio.run(broadcast({
                 "type": "trace",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {
                     "source": "waqi",
-                    "message": f"WAQI API returned error: {data.get('data')}. Generating mock Delhi stations."
+                    "message": f"WAQI API returned error: {data.get('data')}. Generating mock fallback observations."
                 }
             }))
             return mock_fallback
@@ -136,7 +137,7 @@ def fetch_waqi_stations(bbox: tuple) -> list:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {
                 "source": "waqi",
-                "message": f"Error fetching WAQI stations ({str(e)}). Generating mock Delhi fallback observations."
+                "message": f"Error fetching WAQI stations ({str(e)}). Generating mock fallback observations."
             }
         }))
         return mock_fallback
