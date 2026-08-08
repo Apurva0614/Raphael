@@ -129,13 +129,29 @@ def job_gdacs():
 
 
 def job_firms():
-    from ingestion.flows.fire_firms import firms_flow
-    _safe_run("firms", firms_flow)
+    from utils.lock import PipelineLock
+    lock = PipelineLock()
+    if not lock.acquire_non_blocking():
+        log.warning("FIRMS job skipped because another cycle is running")
+        return
+    try:
+        from ingestion.flows.fire_firms import firms_flow
+        _safe_run("firms", firms_flow)
+    finally:
+        lock.release()
 
 
 def job_lst_modis():
-    from ingestion.flows.lst_modis import lst_modis_flow
-    _safe_run("lst_modis", lst_modis_flow)
+    from utils.lock import PipelineLock
+    lock = PipelineLock()
+    if not lock.acquire_non_blocking():
+        log.warning("MODIS LST job skipped because another cycle is running")
+        return
+    try:
+        from ingestion.flows.lst_modis import lst_modis_flow
+        _safe_run("lst_modis", lst_modis_flow)
+    finally:
+        lock.release()
 
 
 def job_intelligence_cycle():
@@ -167,19 +183,28 @@ def job_hourly_pipeline():
     Ingestion flows are run sequentially so the ML cycle always receives
     fresh data from the current hour.
     """
-    log.info("═══ HOURLY PIPELINE START ═══")
+    from utils.lock import PipelineLock
+    lock = PipelineLock()
+    if not lock.acquire_non_blocking():
+        log.warning("Hourly pipeline skipped because another cycle is running")
+        return
 
-    # 1. Ingest fast sources
-    job_openaq()
-    job_waqi()
-    job_iqair()
-    job_openmeteo()
-    job_gdacs()
+    try:
+        log.info("═══ HOURLY PIPELINE START ═══")
 
-    # 2. Run intelligence cycle on freshly-ingested data
-    job_intelligence_cycle()
+        # 1. Ingest fast sources
+        job_openaq()
+        job_waqi()
+        job_iqair()
+        job_openmeteo()
+        job_gdacs()
 
-    log.info("═══ HOURLY PIPELINE DONE  ═══")
+        # 2. Run intelligence cycle on freshly-ingested data
+        job_intelligence_cycle()
+
+        log.info("═══ HOURLY PIPELINE DONE  ═══")
+    finally:
+        lock.release()
 
 
 # ════════════════════════════════════════════════════════════════════════════

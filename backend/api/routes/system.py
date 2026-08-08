@@ -118,6 +118,10 @@ async def trigger_intelligence_cycle(
     region_id: str = Query(None, min_length=32, max_length=36, pattern=r"^[0-9a-fA-F-]{32,36}$"),
     _user=Depends(get_current_user)
 ):
+    from utils.lock import PipelineLock
+    lock = PipelineLock()
+    if not lock.acquire_non_blocking():
+        raise HTTPException(status_code=429, detail="Pipeline or intelligence cycle is already running.")
     try:
         from ml.runner import run_intelligence_cycle
         result = await asyncio.to_thread(run_intelligence_cycle, region_id)
@@ -134,6 +138,8 @@ async def trigger_intelligence_cycle(
             "meta": {},
             "errors": [{"code": "ML_CYCLE_FAILED", "message": str(e)}]
         }
+    finally:
+        lock.release()
 
 @router.post("/intelligence/run")
 async def trigger_intelligence_cycle_run(
@@ -141,8 +147,19 @@ async def trigger_intelligence_cycle_run(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    from ml.runner import run_intelligence_cycle
-    background_tasks.add_task(run_intelligence_cycle, db=db)
+    from utils.lock import PipelineLock
+    lock = PipelineLock()
+    if not lock.acquire_non_blocking():
+        raise HTTPException(status_code=429, detail="Pipeline or intelligence cycle is already running.")
+    
+    def run_and_release(lock_obj, *args, **kwargs):
+        try:
+            from ml.runner import run_intelligence_cycle
+            run_intelligence_cycle(*args, **kwargs)
+        finally:
+            lock_obj.release()
+
+    background_tasks.add_task(run_and_release, lock, db=db)
     return {"status": "triggered", 
             "message": "Intelligence cycle started in background"}
 
