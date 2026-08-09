@@ -36,6 +36,18 @@ def ensure_columns(db: Session):
             db.execute(text("ALTER TABLE alert_events ADD COLUMN severity TEXT DEFAULT 'warning';"))
         db.commit()
 
+    # 3. Check consecutive_fires_by_zone on alert_rules
+    try:
+        db.execute(text("SELECT consecutive_fires_by_zone FROM alert_rules LIMIT 1"))
+    except Exception:
+        db.rollback()
+        log.info("Adding consecutive_fires_by_zone column to alert_rules")
+        if dialect == "postgresql":
+            db.execute(text("ALTER TABLE alert_rules ADD COLUMN consecutive_fires_by_zone TEXT DEFAULT '{}';"))
+        else:
+            db.execute(text("ALTER TABLE alert_rules ADD COLUMN consecutive_fires_by_zone TEXT DEFAULT '{}';"))
+        db.commit()
+
 def get_current_zone_value(db: Session, zone_id: str, layer_type: str) -> tuple:
     # Returns (current_value, timestamp) or (None, None)
     if layer_type in ["risk_score", "composite"]:
@@ -75,8 +87,6 @@ def evaluate_alerts(db: Session, region_id: str):
     triggered_now = datetime.now(timezone.utc)
     
     for rule in rules:
-        rule_fired_any_zone = False
-        
         # Get zones for this rule
         if rule.zone_id:
             zones = db.query(ZoneGeometry).filter(ZoneGeometry.id == rule.zone_id).all()
@@ -94,16 +104,27 @@ def evaluate_alerts(db: Session, region_id: str):
                 fired = True
             elif rule.operator == 'lt' and val < rule.threshold:
                 fired = True
+            
+            # Load per-zone fire tracking dictionary
+            raw_json = getattr(rule, "consecutive_fires_by_zone", None) or '{}'
+            try:
+                fires_by_zone = json.loads(raw_json)
+            except Exception:
+                fires_by_zone = {}
                 
+            zone_key = str(zone.id)
+            
             if fired:
-                rule_fired_any_zone = True
+                fires_by_zone[zone_key] = fires_by_zone.get(zone_key, 0) + 1
+            else:
+                fires_by_zone[zone_key] = 0
                 
-                # Increment consecutive fires
-                rule.consecutive_fires = (rule.consecutive_fires or 0) + 1
-                db.commit()
-                
+            rule.consecutive_fires_by_zone = json.dumps(fires_by_zone)
+            db.commit()
+            
+            if fired:
                 escalated_severity = rule.severity
-                if rule.consecutive_fires >= 3:
+                if fires_by_zone.get(zone_key, 0) >= 3:
                     escalated_severity = "critical"
                     
                 # Get cause and risk info
@@ -167,8 +188,3 @@ def evaluate_alerts(db: Session, region_id: str):
                 })
                 
                 log.info("Alert fired successfully!", rule_name=rule.name, zone_name=zone.name, severity=escalated_severity)
-                
-        # If the rule didn't fire in ANY zone during this cycle, reset consecutive fires count
-        if not rule_fired_any_zone:
-            setattr(rule, "consecutive_fires", 0)
-            db.commit()

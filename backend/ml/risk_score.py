@@ -16,6 +16,18 @@ from sqlalchemy import text
 
 WEIGHTS = {"aq": 0.40, "lst": 0.35, "ndvi": 0.25}
 
+WHO_BREAKPOINTS = [(0, 15, 0.0, 0.25), (15, 35, 0.25, 0.50), (35, 75, 0.50, 0.75), (75, 500, 0.75, 1.0)]
+
+
+def who_normalize(pm25: float) -> float:
+    """Normalize PM2.5 concentration using WHO breakpoint scale [0.0, 1.0]."""
+    if pm25 < 0:
+        return 0.0
+    for lo, hi, s_lo, s_hi in WHO_BREAKPOINTS:
+        if lo <= pm25 < hi:
+            return s_lo + (pm25 - lo) / (hi - lo) * (s_hi - s_lo)
+    return 1.0
+
 
 def get_zone_risk_assessment(aq_val: float, lst_val: float, ndvi_val: float) -> dict:
     """

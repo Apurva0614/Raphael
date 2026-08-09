@@ -134,6 +134,7 @@ class AlertRule(Base):
     is_active         = Column(Boolean, default=True)
     created_at        = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     consecutive_fires = Column(Integer, default=0)
+    consecutive_fires_by_zone = Column(Text, default="{}")
 
 class AlertEvent(Base):
     __tablename__ = "alert_events"

@@ -1,0 +1,101 @@
+:root {
+  --black: #07100f;
+  --white: #f5f7f0;
+  --amber: #c9a457;
+  --red: #e05c4f;
+  --green: #77b884;
+  --cyan: #33f2f0;
+  --olive: #a7b96f;
+  --violet: #8b87c7;
+  --status-white: var(--white);
+  --status-amber: var(--amber);
+  --status-red: var(--red);
+  --status-live: var(--green);
+  --status-live-bright: #a7d5ad;
+  --domain-rf-ew: #b8841f;
+  --domain-cyber: var(--violet);
+  --domain-pnt: #7fa8d8;
+  --domain-space: #65b8b2;
+  --domain-drone: var(--green);
+  --domain-context: #9ba6ad;
+  --panel: rgba(13, 23, 24, 0.9);
+  --panel-strong: rgba(9, 17, 18, 0.96);
+  --panel-soft: rgba(24, 38, 38, 0.76);
+  --control-surface: rgba(19, 30, 30, 0.58);
+  --control-surface-active: rgba(47, 82, 80, 0.66);
+  --control-line: rgba(154, 190, 180, 0.25);
+  --line: rgba(220, 227, 213, 0.13);
+  --line-bright: rgba(220, 227, 213, 0.28);
+  --text-primary: #f5f7f0;
+  --text-muted: #b6beb2;
+  --text-subtle: #879188;
+  --ambient-cyan: rgba(79, 181, 178, 0.18);
+  --ambient-olive: rgba(145, 166, 92, 0.15);
+  --ambient-violet: rgba(111, 101, 173, 0.12);
+  --font-sans:
+    Aptos, "Aptos Display", "IBM Plex Sans Condensed", "IBM Plex Sans", "SF Pro Text",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display:
+    "Aptos Display", Aptos, "IBM Plex Sans Condensed", "IBM Plex Sans", "SF Pro Display",
+    ui-sans-serif, system-ui, sans-serif;
+
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--black);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100svh;
+  overflow: hidden;
+  background: var(--black);
+}
+
+button,
+a {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-family: var(--font-display);
+  color: var(--text-primary);
+  font-size: 2rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+#root {
+  height: 100svh;
+}
+
+@media (max-width: 980px) {
+  h1 {
+    font-size: 1.65rem;
+  }
+}
