@@ -154,31 +154,30 @@ def process_ndvi_granule(granule: dict, bbox: tuple, target_date: date) -> tuple
         import earthaccess
         
         auth = earthaccess.login(strategy="environment")
-        tmp_dir = Path(tempfile.mkdtemp())
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
 
-        # Download using earthaccess
-        downloaded_files = earthaccess.download([granule], local_path=str(tmp_dir))
-        
-        if not downloaded_files:
-            print("No files downloaded by earthaccess — mock fallback")
-            tile_path = generate_mock_ndvi_tile(bbox, target_date=target_date)
-            return str(tile_path), None, None, None
+            # Download using earthaccess
+            downloaded_files = earthaccess.download([granule], local_path=str(tmp_dir))
             
-        hdf_path = Path(downloaded_files[0])
+            if not downloaded_files:
+                print("No files downloaded by earthaccess — mock fallback")
+                tile_path = generate_mock_ndvi_tile(bbox, target_date=target_date)
+                return str(tile_path), None, None, None
+                
+            hdf_path = Path(downloaded_files[0])
 
-        asyncio.run(broadcast({
-            "type": "trace",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "payload": {
-                "source": "modis_ndvi",
-                "message": f"Downloaded NDVI HDF4 granule ({hdf_path.stat().st_size} bytes), processing..."
-            }
-        }))
+            asyncio.run(broadcast({
+                "type": "trace",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": {
+                    "source": "modis_ndvi",
+                    "message": f"Downloaded NDVI HDF4 granule ({hdf_path.stat().st_size} bytes), processing..."
+                }
+            }))
 
-        tile_path, scaled_array, transform, crs = process_modis_ndvi(hdf_path, bbox, target_date)
-        hdf_path.unlink(missing_ok=True)
-
-        return str(tile_path) if tile_path else "", scaled_array, transform, crs
+            tile_path, scaled_array, transform, crs = process_modis_ndvi(hdf_path, bbox, target_date)
+            return str(tile_path) if tile_path else "", scaled_array, transform, crs
 
     except Exception as e:
         print(f"Real NDVI processing failed: {e}")
