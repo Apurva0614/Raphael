@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchWithAuth } from "@/hooks/useZones";
+import { fetchWithAuth, useActiveRegion, useZones } from "@/hooks/useZones";
 import {
   Radar,
   RadarChart,
@@ -54,6 +54,7 @@ const ZONES = [
 const SEV_COLOR: Record<string, string> = {
   critical: COLORS.red,
   high: "#fb923c",
+  warning: COLORS.amber,
   moderate: COLORS.amber,
   low: "#84cc16",
   nominal: COLORS.green,
@@ -187,6 +188,30 @@ function DashboardPage() {
   const [now, setNow] = useState(() => new Date());
   const [countdown, setCountdown] = useState(47 * 60 + 22);
   const [cycleState, setCycleState] = useState<'idle' | 'triggering' | 'triggered' | 'error'>('idle');
+
+  const { data: activeRegion } = useActiveRegion();
+  const { data: rawZones = [] } = useZones(activeRegion?.id);
+
+  const zonesList = useMemo(() => {
+    if (rawZones && rawZones.length > 0) {
+      return rawZones.map((z: any) => ({
+        name: z.name,
+        score: z.risk,
+        sev: z.severity || "nominal"
+      }));
+    }
+    return ZONES;
+  }, [rawZones]);
+
+  const primaryZone = useMemo(() => {
+    if (rawZones && rawZones.length > 0) {
+      return rawZones.find((z: any) => z.name === "Pune NE Quadrant") || rawZones[0];
+    }
+    return null;
+  }, [rawZones]);
+
+  const aqiVal = primaryZone ? Math.round(primaryZone.aqi) : 142;
+  const aqiCategory = aqiVal > 200 ? "SEVERE" : aqiVal > 150 ? "VERY POOR" : aqiVal > 100 ? "POOR" : aqiVal > 50 ? "MODERATE" : "GOOD";
 
   const { data: intelStatus, refetch: refetchIntelStatus } = useQuery({
     queryKey: ["intelligenceStatus"],
@@ -390,7 +415,7 @@ function DashboardPage() {
         <Panel>
           <PanelHeader title="Zone Risk Matrix" />
           <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-            {ZONES.map((z) => {
+            {zonesList.map((z) => {
               const c = SEV_COLOR[z.sev];
               return (
                 <div
@@ -817,23 +842,23 @@ function DashboardPage() {
         <MetricPanel
           title="AQI · PM2.5"
           tag="OpenAQ / WAQI"
-          value="142"
+          value={primaryZone ? String(Math.round(primaryZone.aqi)) : "142"}
           valueColor={COLORS.amber}
-          subtitle="UNHEALTHY · 24H AVG"
+          subtitle={primaryZone ? `${aqiCategory} · 24H AVG` : "UNHEALTHY · 24H AVG"}
           subtitleColor={COLORS.amber}
           trend={AQI_TREND}
           trendColor={COLORS.amber}
           lineage={LINEAGE.aqi}
           rows={[
-            { label: "PM2.5", value: "89.4 μg/m³", pct: 60, color: COLORS.red },
-            { label: "PM10", value: "124.1 μg/m³", pct: 75, color: COLORS.amber },
-            { label: "NO₂", value: "48.2 μg/m³", pct: 40, color: COLORS.amber },
+            { label: "PM2.5", value: primaryZone ? `${primaryZone.aqi.toFixed(1)} μg/m³` : "89.4 μg/m³", pct: 60, color: COLORS.red },
+            { label: "PM10", value: "124.1 μg/m³ (Mock)", pct: 75, color: COLORS.amber },
+            { label: "NO₂", value: "48.2 μg/m³ (Mock)", pct: 40, color: COLORS.amber },
           ]}
           pills={[
             { dot: COLORS.green, text: "12 STATIONS ACTIVE" },
             { dot: COLORS.cyan, text: "CPCB INDIA FEED" },
           ]}
-          footer="↑ 8.2% VS YESTERDAY"
+          footer="↑ 8.2% VS YESTERDAY (Mock)"
           footerColor={COLORS.red}
         />
 
@@ -843,17 +868,17 @@ function DashboardPage() {
         <MetricPanel
           title="LST · Thermal"
           tag="MODIS / NASA"
-          value="38.4°C"
+          value={primaryZone ? `${primaryZone.lst.toFixed(1)}°C` : "38.4°C"}
           valueColor="#00d4ff"
-          subtitle="ABOVE BASELINE · +3.1°C"
+          subtitle={primaryZone ? "CURRENT LST" : "ABOVE BASELINE · +3.1°C"}
           subtitleColor={COLORS.amber}
           trend={LST_TREND}
           trendColor="#00d4ff"
           lineage={LINEAGE.lst}
           rows={[
-            { label: "DAY LST", value: "38.4°C", pct: 70, color: COLORS.amber },
-            { label: "NIGHT LST", value: "24.1°C", pct: 35, color: COLORS.cyan },
-            { label: "BASELINE", value: "35.3°C", pct: 60, color: COLORS.muted },
+            { label: "DAY LST", value: primaryZone ? `${primaryZone.lst.toFixed(1)}°C` : "38.4°C", pct: 70, color: COLORS.amber },
+            { label: "NIGHT LST", value: "24.1°C (Mock)", pct: 35, color: COLORS.cyan },
+            { label: "BASELINE", value: "35.3°C (Mock)", pct: 60, color: COLORS.muted },
           ]}
           pills={[
             { dot: COLORS.cyan, text: "MODIS DAILY" },
@@ -893,17 +918,17 @@ function DashboardPage() {
         <MetricPanel
           title="NDVI · Green Cover"
           tag="Sentinel-2"
-          value="0.34"
+          value={primaryZone ? primaryZone.ndvi.toFixed(2) : "0.34"}
           valueColor={COLORS.red}
-          subtitle="DECLINING · LAST 30D"
+          subtitle={primaryZone ? "CURRENT NDVI" : "DECLINING · LAST 30D"}
           subtitleColor={COLORS.red}
           trend={NDVI_TREND}
           trendColor={COLORS.green}
           lineage={LINEAGE.ndvi}
           rows={[
-            { label: "DENSE VEG", value: "12%", pct: 12, color: COLORS.green },
-            { label: "SPARSE VEG", value: "31%", pct: 31, color: COLORS.cyan },
-            { label: "BARE/URBAN", value: "57%", pct: 57, color: COLORS.red },
+            { label: "DENSE VEG", value: "12% (Mock)", pct: 12, color: COLORS.green },
+            { label: "SPARSE VEG", value: "31% (Mock)", pct: 31, color: COLORS.cyan },
+            { label: "BARE/URBAN", value: "57% (Mock)", pct: 57, color: COLORS.red },
           ]}
           pills={[
             { dot: COLORS.green, text: "SENTINEL-2" },
@@ -944,7 +969,7 @@ function DashboardPage() {
           <PanelHeader title="Composite Risk Score" tag="ML ENGINE" lineage={LINEAGE.composite} />
           <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
             <span style={{ fontFamily: MONO, fontSize: 48, color: COLORS.red, lineHeight: 1, fontWeight: 600 }}>
-              7.8
+              {primaryZone ? primaryZone.risk.toFixed(1) : "7.8"}
             </span>
             <span style={{ fontFamily: MONO, fontSize: 14, color: COLORS.muted }}>/10</span>
           </div>
@@ -957,10 +982,10 @@ function DashboardPage() {
               marginTop: 4,
             }}
           >
-            HIGH RISK · NE QUADRANT
+            {primaryZone ? `${primaryZone.classification.toUpperCase()} · ${primaryZone.name.toUpperCase()}` : "HIGH RISK · NE QUADRANT"}
           </div>
           <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", padding: "8px 0" }}>
-            <RadialArc value={78} color={COLORS.red} />
+            <RadialArc value={primaryZone ? Math.round(primaryZone.risk * 10) : 78} color={COLORS.red} />
           </div>
           <div
             style={{
@@ -975,9 +1000,9 @@ function DashboardPage() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {[
-              { label: "AQ WEIGHT", value: "34.2pts", pct: 44, color: COLORS.amber },
-              { label: "LST WEIGHT", value: "26.4pts", pct: 34, color: COLORS.red },
-              { label: "NDVI WEIGHT", value: "17.4pts", pct: 22, color: COLORS.green },
+              { label: "AQ WEIGHT", value: primaryZone ? `${(primaryZone.aqi * 0.24).toFixed(1)}pts` : "34.2pts", pct: 44, color: COLORS.amber },
+              { label: "LST WEIGHT", value: primaryZone ? `${(primaryZone.lst * 0.68).toFixed(1)}pts` : "26.4pts", pct: 34, color: COLORS.red },
+              { label: "NDVI WEIGHT", value: primaryZone ? `${(primaryZone.ndvi * 51.1).toFixed(1)}pts` : "17.4pts", pct: 22, color: COLORS.green },
             ].map((r) => (
               <DataRow key={r.label} row={r} />
             ))}

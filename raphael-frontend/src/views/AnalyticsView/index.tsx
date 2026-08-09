@@ -177,6 +177,18 @@ export default function AnalyticsView() {
     queryFn: () => fetchWithAuth("/api/v1/anomalies?days=7"),
   });
 
+  const { data: aqForecastData } = useQuery({
+    queryKey: ["aqForecast", selectedZone?.id],
+    queryFn: () => fetchWithAuth(`/api/v1/layers/aq/forecast?zone_id=${selectedZone.id}&hours=72`),
+    enabled: !!selectedZone?.id,
+  });
+
+  const { data: lstForecastData } = useQuery({
+    queryKey: ["lstForecast", selectedZone?.id],
+    queryFn: () => fetchWithAuth(`/api/v1/layers/lst/forecast?zone_id=${selectedZone.id}&hours=72`),
+    enabled: !!selectedZone?.id,
+  });
+
   const { points: anomPoints, layers: anomLayers } = React.useMemo(() => {
     const rawList = anomaliesData?.data;
     if (!Array.isArray(rawList)) {
@@ -238,6 +250,33 @@ export default function AnalyticsView() {
     }
     return zones[0] || SAMPLE_ZONES[0];
   }, [selectedZoneState, zones]);
+
+  const seriesData = React.useMemo(() => {
+    const historyData = mockAQIData.map((d) => ({
+      ...d,
+      anom: anomalyDates.has(d.date) ? d.aqi : null,
+    }));
+
+    const aqForecast = aqForecastData?.data?.forecast || [];
+    const lstForecast = lstForecastData?.data?.forecast || [];
+
+    if (aqForecast.length > 0 && lstForecast.length > 0) {
+      const liveForecast = aqForecast.map((item: any, idx: number) => {
+        const dateObj = new Date(item.timestamp);
+        const options: Intl.DateTimeFormatOptions = { month: "short", day: "2-digit" };
+        const dateFormatted = dateObj.toLocaleDateString("en-US", options);
+        const lstItem = lstForecast[idx] || {};
+        return {
+          date: dateFormatted,
+          aqiFc: item.value,
+          lstFc: lstItem.value || 30.0,
+        };
+      });
+      return [...historyData, ...liveForecast];
+    }
+
+    return [...historyData, ...mockForecast];
+  }, [aqForecastData, lstForecastData]);
 
   if (!isLoading && rawZones.length === 0) {
     return <EmptyState regionName={activeRegion?.name} />;
@@ -345,7 +384,7 @@ export default function AnalyticsView() {
         />
         <div style={{ padding: 8, height: 260 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={SERIES}>
+            <ComposedChart data={seriesData}>
               <CartesianGrid stroke={C.border} vertical={false} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9, fontFamily: MONO }} interval={2} />
               <YAxis yAxisId="l" tick={{ fill: C.amber, fontSize: 9, fontFamily: MONO }} domain={[0, 300]} />
