@@ -7,13 +7,21 @@ router = APIRouter()
 
 @router.get("")
 async def get_anomalies(days: int = Query(7, ge=1, le=365), db: Session = Depends(get_db)):
-    rows = db.execute(text("""
+    from db.connection import IS_SPATIALITE
+    if IS_SPATIALITE:
+        time_clause = "datetime('now', :days_interval)"
+        params = {"days_interval": f"-{days} days"}
+    else:
+        time_clause = "NOW() - CAST(:days_interval AS INTERVAL)"
+        params = {"days_interval": f"{days} days"}
+
+    rows = db.execute(text(f"""
         SELECT id, layer_type, value, unit, station_name, observed_at, anomaly_score
         FROM raw_observations
-        WHERE is_anomalous = 1
-          AND observed_at > datetime('now', :days_interval)
+        WHERE is_anomalous = true
+          AND observed_at > {time_clause}
         ORDER BY observed_at DESC
-    """), {"days_interval": f"-{days} days"}).fetchall()
+    """), params).fetchall()
     
     anomalies = []
     for r in rows:

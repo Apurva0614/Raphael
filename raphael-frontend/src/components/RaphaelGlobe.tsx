@@ -138,6 +138,12 @@ export function RaphaelGlobe({
         viewer.imageryLayers.addImageryProvider(provider);
       } catch (e) {
         console.error("Failed to load high-resolution aerial imagery:", e);
+        try {
+          viewer.imageryLayers.removeAll();
+          viewer.imageryLayers.addImageryProvider(new Cesium.GridImageryProvider());
+        } catch (err) {
+          console.error("Failed to add fallback grid imagery provider:", err);
+        }
       }
 
       // Terrain Clamping
@@ -145,6 +151,10 @@ export function RaphaelGlobe({
         viewer.terrainProvider = await Cesium.createWorldTerrainAsync();
       } catch (e) {
         console.error("Failed to load world terrain:", e);
+        // Explicitly set ellipsoid provider to avoid long terrain loading timeouts
+        try {
+          viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        } catch {}
       }
 
       viewer.resolutionScale = window.devicePixelRatio || 1;
@@ -276,7 +286,9 @@ export function RaphaelGlobe({
           (id.endsWith("-point") ||
             id.endsWith("-label") ||
             id.endsWith("-zone") ||
+            id.includes("-zone-") ||
             id.endsWith("-zone-outline") ||
+            id.includes("-zone-outline-") ||
             id.endsWith("-zone-edge-label"))
         ) {
           toRemove.push(e);
@@ -284,222 +296,169 @@ export function RaphaelGlobe({
       });
       toRemove.forEach((e) => v.entities.remove(e));
 
-      const colorFor = (sev: string) =>
+      const fillMaterialFor = (sev: string) =>
         sev === "critical"
-          ? Cesium.Color.RED.withAlpha(0.9)
+          ? Cesium.Color.RED.withAlpha(0.12)
           : sev === "warning"
-            ? Cesium.Color.fromCssColorString("#d4a853").withAlpha(0.9)
-            : Cesium.Color.fromCssColorString("#4a7c59").withAlpha(0.9);
+            ? Cesium.Color.fromCssColorString("#d4a853").withAlpha(0.12)
+            : Cesium.Color.fromCssColorString("#4a7c59").withAlpha(0.12);
+
+      const outlineColorFor = (sev: string) =>
+        sev === "critical"
+          ? Cesium.Color.RED
+          : sev === "warning"
+            ? Cesium.Color.fromCssColorString("#d4a853")
+            : Cesium.Color.fromCssColorString("#a7b96f");
 
       for (const zone of zones) {
-        const carto = Cesium.Cartographic.fromDegrees(zone.lon, zone.lat);
-        Cesium.sampleTerrainMostDetailed(v.terrainProvider, [carto])
-          .then((sampled) => {
-            if (cancelled) return;
-            const pos = sampled[0];
-            const hasHeight = pos && typeof pos.height === "number" && !isNaN(pos.height);
-            const terrainHeight = hasHeight ? pos.height : 0.0;
-            const hr = hasHeight ? Cesium.HeightReference.RELATIVE_TO_TERRAIN : Cesium.HeightReference.CLAMP_TO_GROUND;
+        const finalPosition = Cesium.Cartesian3.fromDegrees(zone.lon, zone.lat, 0.0);
+        const hr = Cesium.HeightReference.CLAMP_TO_GROUND;
 
-            const finalPosition = Cesium.Cartesian3.fromDegrees(zone.lon, zone.lat, terrainHeight);
+        // Point/Hex Icon marker
+        v.entities.add({
+          id: `${zone.id}-point`,
+          position: finalPosition,
+          show: showZones,
+          billboard: {
+            image: HEX_ICONS[zone.severity] ?? HEX_ICONS.nominal,
+            width: 28,
+            height: 28,
+            scaleByDistance: new Cesium.NearFarScalar(1.5e2, 1.6, 1.5e7, 0.6),
+            translucencyByDistance: new Cesium.NearFarScalar(1.5e7, 1.0, 1.5e8, 0.0),
+            heightReference: hr,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
 
-            v.entities.add({
-              id: `${zone.id}-point`,
-              position: finalPosition,
-              show: showZones,
-              billboard: {
-                image: HEX_ICONS[zone.severity] ?? HEX_ICONS.nominal,
-                width: 28,
-                height: 28,
-                scaleByDistance: new Cesium.NearFarScalar(1.5e2, 1.6, 1.5e7, 0.6),
-                translucencyByDistance: new Cesium.NearFarScalar(1.5e7, 1.0, 1.5e8, 0.0),
-                heightReference: hr,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              },
-            });
+        // Label
+        v.entities.add({
+          id: `${zone.id}-label`,
+          position: finalPosition,
+          show: showZones,
+          label: {
+            text: `${zone.name}\nAQI ${zone.aqi} · LST ${zone.lst}°C`,
+            font: "11px JetBrains Mono, monospace",
+            fillColor: Cesium.Color.fromCssColorString("#e8dcc8"),
+            backgroundColor: Cesium.Color.fromCssColorString("#080c08").withAlpha(0.85),
+            showBackground: true,
+            backgroundPadding: new Cesium.Cartesian2(8, 4),
+            pixelOffset: new Cesium.Cartesian2(0, -28),
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000000),
+            heightReference: hr,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
 
-            v.entities.add({
-              id: `${zone.id}-label`,
-              position: finalPosition,
-              show: showZones,
-              label: {
-                text: `${zone.name}\nAQI ${zone.aqi} · LST ${zone.lst}°C`,
-                font: "11px JetBrains Mono, monospace",
-                fillColor: Cesium.Color.fromCssColorString("#e8dcc8"),
-                backgroundColor: Cesium.Color.fromCssColorString("#080c08").withAlpha(0.85),
-                showBackground: true,
-                backgroundPadding: new Cesium.Cartesian2(8, 4),
-                pixelOffset: new Cesium.Cartesian2(0, -28),
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000000),
-                heightReference: hr,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              },
-            });
+        const fillMaterial = fillMaterialFor(zone.severity);
+        const outlineColor = outlineColorFor(zone.severity);
 
-            // 1. Semi-transparent low-opacity fill ellipse
+        // Geometry (Polygon/MultiPolygon) or circle fallback
+        if (zone.geometry) {
+          const type = zone.geometry.type;
+          if (type === "Polygon") {
+            const coords = zone.geometry.coordinates[0];
+            const hierarchy = coords.flatMap((c: any) => [c[0], c[1]]);
             v.entities.add({
               id: `${zone.id}-zone`,
-              position: finalPosition,
               show: showZones,
-              ellipse: {
-                semiMinorAxis: zone.radiusKm * 1000,
-                semiMajorAxis: zone.radiusKm * 1000,
-                material:
-                  zone.severity === "critical"
-                    ? Cesium.Color.RED.withAlpha(0.02)
-                    : Cesium.Color.fromCssColorString("#4a7c59").withAlpha(0.02),
-                outline: false,
-                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              polygon: {
+                hierarchy: Cesium.Cartesian3.fromDegreesArray(hierarchy),
+                material: fillMaterial,
+                heightReference: hr,
               },
             });
-
-            // 2. Dashed circle outline polyline
             v.entities.add({
               id: `${zone.id}-zone-outline`,
               show: showZones,
               polyline: {
-                positions: Cesium.Cartesian3.fromDegreesArray(
-                  getCirclePoints(zone.lon, zone.lat, zone.radiusKm)
-                ),
+                positions: Cesium.Cartesian3.fromDegreesArray(hierarchy),
                 width: 2.0,
-                material: new Cesium.PolylineDashMaterialProperty({
-                  color:
-                    zone.severity === "critical"
-                      ? Cesium.Color.RED
-                      : Cesium.Color.fromCssColorString("#a7b96f"),
-                  dashLength: 16.0,
-                }),
+                material: outlineColor,
                 clampToGround: true,
               },
             });
-
-            // 3. Risk factor / classification label at circle's edge point (east-most)
-            const radiusMeters = zone.radiusKm * 1000;
-            const lonR = radiusMeters / (111320 * Math.cos((zone.lat * Math.PI) / 180));
-            const edgeLon = zone.lon + lonR;
-            const edgeLat = zone.lat;
-
-            v.entities.add({
-              id: `${zone.id}-zone-edge-label`,
-              position: Cesium.Cartesian3.fromDegrees(edgeLon, edgeLat, terrainHeight),
-              show: showZones,
-              label: {
-                text: zone.classification.toUpperCase(),
-                font: "9px JetBrains Mono, monospace",
-                fillColor:
-                  zone.severity === "critical"
-                    ? Cesium.Color.RED
-                    : Cesium.Color.fromCssColorString("#a7b96f"),
-                backgroundColor: Cesium.Color.fromCssColorString("#080c08").withAlpha(0.85),
-                showBackground: true,
-                backgroundPadding: new Cesium.Cartesian2(6, 3),
-                pixelOffset: new Cesium.Cartesian2(10, 0),
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000000),
-                heightReference: hr,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              },
+          } else if (type === "MultiPolygon") {
+            zone.geometry.coordinates.forEach((poly: any, idx: number) => {
+              const coords = poly[0];
+              const hierarchy = coords.flatMap((c: any) => [c[0], c[1]]);
+              v.entities.add({
+                id: `${zone.id}-zone-${idx}`,
+                show: showZones,
+                polygon: {
+                  hierarchy: Cesium.Cartesian3.fromDegreesArray(hierarchy),
+                  material: fillMaterial,
+                  heightReference: hr,
+                },
+              });
+              v.entities.add({
+                id: `${zone.id}-zone-outline-${idx}`,
+                show: showZones,
+                polyline: {
+                  positions: Cesium.Cartesian3.fromDegreesArray(hierarchy),
+                  width: 2.0,
+                  material: outlineColor,
+                  clampToGround: true,
+                },
+              });
             });
-          })
-          .catch((err) => {
-            console.error("Terrain sampling failed:", err);
-            if (cancelled) return;
-            const finalPosition = Cesium.Cartesian3.fromDegrees(zone.lon, zone.lat, 0.0);
-            const hr = Cesium.HeightReference.CLAMP_TO_GROUND;
-
-            v.entities.add({
-              id: `${zone.id}-point`,
-              position: finalPosition,
-              show: showZones,
-              billboard: {
-                image: HEX_ICONS[zone.severity] ?? HEX_ICONS.nominal,
-                width: 28,
-                height: 28,
-                scaleByDistance: new Cesium.NearFarScalar(1.5e2, 1.6, 1.5e7, 0.6),
-                translucencyByDistance: new Cesium.NearFarScalar(1.5e7, 1.0, 1.5e8, 0.0),
-                heightReference: hr,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              },
-            });
-
-            v.entities.add({
-              id: `${zone.id}-label`,
-              position: finalPosition,
-              show: showZones,
-              label: {
-                text: `${zone.name}\nAQI ${zone.aqi} · LST ${zone.lst}°C`,
-                font: "11px JetBrains Mono, monospace",
-                fillColor: Cesium.Color.fromCssColorString("#e8dcc8"),
-                backgroundColor: Cesium.Color.fromCssColorString("#080c08").withAlpha(0.85),
-                showBackground: true,
-                backgroundPadding: new Cesium.Cartesian2(8, 4),
-                pixelOffset: new Cesium.Cartesian2(0, -28),
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000000),
-                heightReference: hr,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              },
-            });
-
-            v.entities.add({
-              id: `${zone.id}-zone`,
-              position: finalPosition,
-              show: showZones,
-              ellipse: {
-                semiMinorAxis: zone.radiusKm * 1000,
-                semiMajorAxis: zone.radiusKm * 1000,
-                material:
-                  zone.severity === "critical"
-                    ? Cesium.Color.RED.withAlpha(0.02)
-                    : Cesium.Color.fromCssColorString("#4a7c59").withAlpha(0.02),
-                outline: false,
-                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-              },
-            });
-
-            v.entities.add({
-              id: `${zone.id}-zone-outline`,
-              show: showZones,
-              polyline: {
-                positions: Cesium.Cartesian3.fromDegreesArray(
-                  getCirclePoints(zone.lon, zone.lat, zone.radiusKm)
-                ),
-                width: 2.0,
-                material: new Cesium.PolylineDashMaterialProperty({
-                  color:
-                    zone.severity === "critical"
-                      ? Cesium.Color.RED
-                      : Cesium.Color.fromCssColorString("#a7b96f"),
-                  dashLength: 16.0,
-                }),
-                clampToGround: true,
-              },
-            });
-
-            const radiusMeters = zone.radiusKm * 1000;
-            const lonR = radiusMeters / (111320 * Math.cos((zone.lat * Math.PI) / 180));
-            const edgeLon = zone.lon + lonR;
-            const edgeLat = zone.lat;
-
-            v.entities.add({
-              id: `${zone.id}-zone-edge-label`,
-              position: Cesium.Cartesian3.fromDegrees(edgeLon, edgeLat, 0.0),
-              show: showZones,
-              label: {
-                text: zone.classification.toUpperCase(),
-                font: "9px JetBrains Mono, monospace",
-                fillColor:
-                  zone.severity === "critical"
-                    ? Cesium.Color.RED
-                    : Cesium.Color.fromCssColorString("#a7b96f"),
-                backgroundColor: Cesium.Color.fromCssColorString("#080c08").withAlpha(0.85),
-                showBackground: true,
-                backgroundPadding: new Cesium.Cartesian2(6, 3),
-                pixelOffset: new Cesium.Cartesian2(10, 0),
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000000),
-                heightReference: hr,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              },
-            });
+          }
+        } else {
+          // Circle Ellipse fallback
+          v.entities.add({
+            id: `${zone.id}-zone`,
+            position: finalPosition,
+            show: showZones,
+            ellipse: {
+              semiMinorAxis: zone.radiusKm * 1000,
+              semiMajorAxis: zone.radiusKm * 1000,
+              material: zone.severity === "critical" ? Cesium.Color.RED.withAlpha(0.02) : Cesium.Color.fromCssColorString("#4a7c59").withAlpha(0.02),
+              outline: false,
+              heightReference: hr,
+            },
           });
+          v.entities.add({
+            id: `${zone.id}-zone-outline`,
+            show: showZones,
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArray(
+                getCirclePoints(zone.lon, zone.lat, zone.radiusKm)
+              ),
+              width: 2.0,
+              material: new Cesium.PolylineDashMaterialProperty({
+                color: zone.severity === "critical" ? Cesium.Color.RED : Cesium.Color.fromCssColorString("#a7b96f"),
+                dashLength: 16.0,
+              }),
+              clampToGround: true,
+            },
+          });
+        }
+
+        // Edge label (Risk factor / classification)
+        const radiusMeters = zone.radiusKm * 1000;
+        const lonR = radiusMeters / (111320 * Math.cos((zone.lat * Math.PI) / 180));
+        const edgeLon = zone.lon + lonR;
+        const edgeLat = zone.lat;
+
+        v.entities.add({
+          id: `${zone.id}-zone-edge-label`,
+          position: Cesium.Cartesian3.fromDegrees(edgeLon, edgeLat, 0.0),
+          show: showZones,
+          label: {
+            text: zone.classification.toUpperCase(),
+            font: "9px JetBrains Mono, monospace",
+            fillColor:
+              zone.severity === "critical"
+                ? Cesium.Color.RED
+                : Cesium.Color.fromCssColorString("#a7b96f"),
+            backgroundColor: Cesium.Color.fromCssColorString("#080c08").withAlpha(0.85),
+            showBackground: true,
+            backgroundPadding: new Cesium.Cartesian2(6, 3),
+            pixelOffset: new Cesium.Cartesian2(10, 0),
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000000),
+            heightReference: hr,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
       }
     });
     return () => { cancelled = true; };

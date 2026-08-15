@@ -179,12 +179,16 @@ async def get_intelligence_status(db: Session = Depends(get_db)):
         else:
             last_run_str = str(last_run)
             
+    from db.connection import IS_SPATIALITE
+    dt_filter_24h = "datetime('now', '-24 hours')" if IS_SPATIALITE else "NOW() - INTERVAL '24 hours'"
+    dt_filter_2h = "datetime('now', '-2 hours')" if IS_SPATIALITE else "NOW() - INTERVAL '2 hours'"
+
     # Anomaly counts from raw_observations (last 24h)
-    anomaly_counts_raw = db.execute(text("""
+    anomaly_counts_raw = db.execute(text(f"""
         SELECT layer_type, COUNT(*) as count
         FROM raw_observations
-        WHERE is_anomalous = 1
-          AND observed_at > datetime('now', '-24 hours')
+        WHERE is_anomalous = true
+          AND observed_at > {dt_filter_24h}
         GROUP BY layer_type
     """)).fetchall()
     
@@ -214,10 +218,10 @@ async def get_intelligence_status(db: Session = Depends(get_db)):
     # Stage is 'pending' if no rows exist for that model type
     stages = {}
     for model_type in ['kmeans_clustering', 'risk_score', 'gaussian_plume']:
-        count = db.execute(text("""
+        count = db.execute(text(f"""
             SELECT COUNT(*) FROM ml_outputs
             WHERE model_type = :mt
-            AND computed_at > datetime('now', '-2 hours')
+            AND computed_at > {dt_filter_2h}
         """), {"mt": model_type}).scalar()
         stages[model_type] = "complete" if count > 0 else "pending"
         

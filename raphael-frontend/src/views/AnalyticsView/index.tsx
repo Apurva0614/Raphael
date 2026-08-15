@@ -172,6 +172,18 @@ export default function AnalyticsView() {
   const isLoading = isActiveRegionLoading || isZonesLoading;
   const [selectedZoneState, setSelectedZoneState] = React.useState<AnalyticsZone | null>(null);
 
+  const zones = React.useMemo<AnalyticsZone[]>(() => {
+    return rawZones.length > 0 ? rawZones : SAMPLE_ZONES;
+  }, [rawZones]);
+
+  const selectedZone = React.useMemo(() => {
+    if (selectedZoneState) {
+      const found = zones.find((z) => z.id === selectedZoneState.id);
+      if (found) return found;
+    }
+    return zones[0] || SAMPLE_ZONES[0];
+  }, [selectedZoneState, zones]);
+
   const { data: anomaliesData } = useQuery({
     queryKey: ["anomalies", 7],
     queryFn: () => fetchWithAuth("/api/v1/anomalies?days=7"),
@@ -238,18 +250,6 @@ export default function AnalyticsView() {
 
     return { points: parsedPoints, layers: parsedLayers };
   }, [anomaliesData]);
-
-  const zones = React.useMemo<AnalyticsZone[]>(() => {
-    return rawZones.length > 0 ? rawZones : SAMPLE_ZONES;
-  }, [rawZones]);
-
-  const selectedZone = React.useMemo(() => {
-    if (selectedZoneState) {
-      const found = zones.find((z) => z.id === selectedZoneState.id);
-      if (found) return found;
-    }
-    return zones[0] || SAMPLE_ZONES[0];
-  }, [selectedZoneState, zones]);
 
   const seriesData = React.useMemo(() => {
     const historyData = mockAQIData.map((d) => ({

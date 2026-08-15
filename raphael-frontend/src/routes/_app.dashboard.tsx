@@ -1,7 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth, useActiveRegion, useZones } from "@/hooks/useZones";
+
+const RaphaelGlobe = lazy(() =>
+  import("@/components/RaphaelGlobe").then((m) => ({ default: m.RaphaelGlobe })),
+);
 import {
   Radar,
   RadarChart,
@@ -733,65 +737,23 @@ function DashboardPage() {
               overflow: "hidden",
             }}
           >
-            <svg width="100%" height="100%" viewBox="0 0 200 140" preserveAspectRatio="none"
-              style={{ position: "absolute", inset: 0, display: "block" }}>
-              <defs>
-                <pattern id="topo-mini" width="22" height="22" patternUnits="userSpaceOnUse">
-                  <path d="M0 16 Q5 4 11 16 T22 16" fill="none" stroke="#c8b89a" strokeWidth="0.5" opacity="0.06" />
-                  <path d="M0 10 Q5 -2 11 10 T22 10" fill="none" stroke="#c8b89a" strokeWidth="0.5" opacity="0.06" />
-                </pattern>
-              </defs>
-              {/* topographic background texture */}
-              <rect width="200" height="140" fill="url(#topo-mini)" />
-
-              {/* abstract urban zone polygons — olive outline */}
-              <g fill="none" stroke="#4a7c59" strokeOpacity="0.4" strokeWidth="0.7">
-                <polygon points="30,40 70,28 95,46 88,72 56,80 28,66" />
-                <polygon points="95,46 140,38 158,60 150,88 110,92 88,72" />
-                <polygon points="56,80 88,72 110,92 96,118 64,116 44,100" />
-                <polygon points="110,92 150,88 168,108 156,128 120,124" />
-                {/* arterial roads */}
-                <path d="M10,70 Q60,60 100,72 T196,80" />
-                <path d="M100,10 Q108,50 100,72 T112,134" />
-                <path d="M20,120 Q70,100 110,92 T180,40" />
-              </g>
-
-              {/* central crosshair / reticle */}
-              <g stroke="#4a7c59" strokeOpacity="0.55" strokeWidth="0.6" fill="none">
-                <circle cx="100" cy="70" r="10" />
-                <circle cx="100" cy="70" r="18" strokeDasharray="2 3" />
-                <line x1="100" y1="54" x2="100" y2="62" />
-                <line x1="100" y1="78" x2="100" y2="86" />
-                <line x1="84" y1="70" x2="92" y2="70" />
-                <line x1="108" y1="70" x2="116" y2="70" />
-              </g>
-
-              {/* zone dots */}
-              {/* NE: Hadapsar — critical (red, pulsing) */}
-              <g>
-                <circle cx="148" cy="48" r="6" fill="#ef4444" opacity="0.35">
-                  <animate attributeName="r" values="5;10;5" dur="1.6s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.45;0;0.45" dur="1.6s" repeatCount="indefinite" />
-                </circle>
-                <circle cx="148" cy="48" r="3" fill="#ef4444" />
-                <text x="154" y="46" fontFamily={MONO} fontSize="5" fill="#ef4444" letterSpacing="0.5">HADAPSAR</text>
-              </g>
-              {/* CENTER: Shivajinagar — amber */}
-              <g>
-                <circle cx="100" cy="70" r="2.5" fill="#f59e0b" />
-                <text x="106" y="68" fontFamily={MONO} fontSize="5" fill="#f59e0b" letterSpacing="0.5">SHIVAJINAGAR</text>
-              </g>
-              {/* SW: Kothrud — green */}
-              <g>
-                <circle cx="56" cy="96" r="2.5" fill="#10b981" />
-                <text x="20" y="94" fontFamily={MONO} fontSize="5" fill="#10b981" letterSpacing="0.5">KOTHRUD</text>
-              </g>
-              {/* S: Katraj — amber */}
-              <g>
-                <circle cx="108" cy="120" r="2.5" fill="#f59e0b" />
-                <text x="114" y="122" fontFamily={MONO} fontSize="5" fill="#f59e0b" letterSpacing="0.5">KATRAJ</text>
-              </g>
-            </svg>
+            <Suspense fallback={
+              <div style={{
+                position: "absolute", inset: 0, display: "grid", placeItems: "center",
+                color: COLORS.muted, fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em"
+              }}>
+                LOADING MAP...
+              </div>
+            }>
+              <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                <RaphaelGlobe
+                  layers={{}}
+                  mode="3D"
+                  zones={rawZones}
+                  showZones={true}
+                />
+              </div>
+            </Suspense>
 
             <div
               style={{
@@ -802,6 +764,8 @@ function DashboardPage() {
                 fontSize: 8,
                 color: COLORS.muted,
                 letterSpacing: "0.16em",
+                zIndex: 10,
+                pointerEvents: "none",
               }}
             >
               PUNE METROPOLITAN REGION
@@ -818,6 +782,8 @@ function DashboardPage() {
                 letterSpacing: "0.16em",
                 opacity: 0,
                 transition: "opacity 160ms ease",
+                zIndex: 10,
+                pointerEvents: "none",
               }}
             >
               OPEN IN EXPLORER →

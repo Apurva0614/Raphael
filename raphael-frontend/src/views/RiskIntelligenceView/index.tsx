@@ -136,6 +136,24 @@ export default function RiskIntelligenceView() {
   const isLoading = isActiveRegionLoading || isZonesLoading;
   const [selected, setSelected] = React.useState(0);
 
+  const ZONES = React.useMemo(() => {
+    const list = zones.length > 0 ? zones : STATIC_ZONES;
+    return list.map((z: any) => ({
+      ...z,
+      name: z.name,
+      risk: z.risk,
+      threat: z.severity || z.threat || "nominal",
+      stressor: z.classification || z.stressor || "Mixed Urban",
+      pop: z.data_source === "mock" && z.properties?.pop ? z.properties.pop : (typeof z.pop === "number" ? z.pop : "—"),
+      delta: z.data_source === "mock" && z.properties?.delta !== undefined ? z.properties.delta : (typeof z.delta === "number" ? z.delta : "—"),
+      aqi: z.aqi,
+      lst: z.lst,
+      ndvi: z.ndvi,
+    }));
+  }, [zones]);
+
+  const zone = ZONES[selected] || ZONES[0];
+
   const { data: propagationData } = useQuery({
     queryKey: ["riskPropagation"],
     queryFn: () => fetchWithAuth("/api/v1/risk/propagation"),
@@ -174,24 +192,6 @@ export default function RiskIntelligenceView() {
       centerlineConc: centerlineConc.length > 0 ? centerlineConc : plumeMockData.centerlineConc,
     };
   }, [propagationData]);
-
-  const ZONES = React.useMemo(() => {
-    const list = zones.length > 0 ? zones : STATIC_ZONES;
-    return list.map((z: any) => ({
-      ...z,
-      name: z.name,
-      risk: z.risk,
-      threat: z.severity || z.threat || "nominal",
-      stressor: z.classification || z.stressor || "Mixed Urban",
-      pop: z.data_source === "mock" && z.properties?.pop ? z.properties.pop : (typeof z.pop === "number" ? z.pop : "—"),
-      delta: z.data_source === "mock" && z.properties?.delta !== undefined ? z.properties.delta : (typeof z.delta === "number" ? z.delta : "—"),
-      aqi: z.aqi,
-      lst: z.lst,
-      ndvi: z.ndvi,
-    }));
-  }, [zones]);
-
-  const zone = ZONES[selected] || ZONES[0];
 
   const pm25Data = React.useMemo(() => {
     const rawForecast = aqForecastData?.data?.forecast || [];

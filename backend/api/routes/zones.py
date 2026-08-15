@@ -99,7 +99,7 @@ def _enrich_zone(z: ZoneGeometry, db: Session) -> dict:
             if IS_SPATIALITE:
                 layer_filter = """
                   AND (
-                    layer_type = 'pm25' 
+                    layer_type IN ('aq', 'pm25') 
                     OR json_extract(raw_payload, '$.parameter') IN 
                        ('pm25', 'pm2.5', 'PM2.5', 'PM25')
                   )
@@ -107,7 +107,7 @@ def _enrich_zone(z: ZoneGeometry, db: Session) -> dict:
             else:
                 layer_filter = """
                   AND (
-                    layer_type = 'pm25' 
+                    layer_type IN ('aq', 'pm25') 
                     OR raw_payload ->> 'parameter' IN 
                        ('pm25', 'pm2.5', 'PM2.5', 'PM25')
                   )
