@@ -9,6 +9,23 @@ from typing import Optional
 from ml.risk_score import get_zone_risk_assessment
 from utils.geo import km_to_degrees
 
+def pm25_to_indian_aqi(pm25: float) -> int:
+    if pm25 <= 0:
+        return 0
+    if pm25 <= 30:
+        return int(round(0 + (pm25 - 0) * (50 - 0) / (30 - 0)))
+    elif pm25 <= 60:
+        return int(round(51 + (pm25 - 31) * (100 - 51) / (60 - 31)))
+    elif pm25 <= 90:
+        return int(round(101 + (pm25 - 61) * (200 - 101) / (90 - 61)))
+    elif pm25 <= 120:
+        return int(round(201 + (pm25 - 91) * (300 - 201) / (120 - 91)))
+    elif pm25 <= 250:
+        return int(round(301 + (pm25 - 121) * (400 - 301) / (250 - 121)))
+    else:
+        val = int(round(401 + (pm25 - 250) * (500 - 401) / (380 - 250)))
+        return min(val, 500)
+
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
@@ -91,8 +108,9 @@ def _enrich_zone(z: ZoneGeometry, db: Session) -> dict:
         point_geom = "ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)"
 
     # Helper function to get the latest value for a layer_type within the zone's buffer
-    def get_latest_val(layer_type: str, lookback_hours: int) -> tuple[Optional[float], Optional[datetime]]:
+    def get_latest_val(layer_type: str, lookback_hours: int, custom_radius: Optional[float] = None) -> tuple[Optional[float], Optional[datetime]]:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+        radius_val = custom_radius if custom_radius is not None else radius_km
         
         # Build layer-specific filters
         if layer_type in ("aq", "pm25"):
@@ -114,7 +132,7 @@ def _enrich_zone(z: ZoneGeometry, db: Session) -> dict:
                 """
         else:
             layer_filter = "AND layer_type = :layer_type"
-
+ 
         sql = text(f"""
             SELECT value, observed_at
             FROM raw_observations
@@ -122,7 +140,7 @@ def _enrich_zone(z: ZoneGeometry, db: Session) -> dict:
               {layer_filter}
               AND ST_Distance(geometry, {point_geom}) <= :radius_deg
               AND observed_at >= :cutoff
-            ORDER BY observed_at DESC, ST_Distance(geometry, {point_geom}) ASC
+            ORDER BY ST_Distance(geometry, {point_geom}) ASC, observed_at DESC
             LIMIT 1
         """)
         row = db.execute(sql, {
@@ -130,25 +148,29 @@ def _enrich_zone(z: ZoneGeometry, db: Session) -> dict:
             "layer_type": layer_type,
             "lon": lon,
             "lat": lat,
-            "radius_deg": km_to_degrees(radius_km),
+            "radius_deg": km_to_degrees(radius_val),
             "cutoff": cutoff
         }).first()
         if row:
             return float(row.value), row.observed_at
         return None, None
-
-    # Fetch values (24h lookback for AQ/weather, 8 days lookback for LST/NDVI)
-    aq_val, aq_at = get_latest_val("aq", 24)
+ 
+    # Fetch values (48h lookback for AQ/weather, 8 days lookback for LST/NDVI)
+    aq_val, aq_at = get_latest_val("aq", 48)
     if aq_val is None:
-        aq_val, aq_at = get_latest_val("pm25", 24)
-
+        aq_val, aq_at = get_latest_val("pm25", 48)
+    if aq_val is None:
+        aq_val, aq_at = get_latest_val("aq", 48, custom_radius=50.0)
+    if aq_val is None:
+        aq_val, aq_at = get_latest_val("pm25", 48, custom_radius=50.0)
+ 
     lst_val, lst_at = get_latest_val("lst", 24 * 8)
     ndvi_val, ndvi_at = get_latest_val("ndvi", 24 * 8)
 
     is_live = (aq_val is not None) or (lst_val is not None) or (ndvi_val is not None)
 
     if is_live:
-        aqi = aq_val if aq_val is not None else telemetry["aqi"]
+        aqi = pm25_to_indian_aqi(aq_val) if aq_val is not None else telemetry["aqi"]
         lst = lst_val if lst_val is not None else telemetry["lst"]
         ndvi = ndvi_val if ndvi_val is not None else telemetry["ndvi"]
         

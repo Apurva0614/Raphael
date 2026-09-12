@@ -10,9 +10,9 @@ mock tile generation if:
 """
 import sys
 import os
-import ssl
-# Monkey-patch to fix Windows SSL ASN1 parsing bug
-ssl.SSLContext._load_windows_store_certs = lambda self, *args, **kwargs: None
+# import ssl
+# # Monkey-patch to fix Windows SSL ASN1 parsing bug
+# ssl.SSLContext._load_windows_store_certs = lambda self, *args, **kwargs: None
 
 from datetime import date, datetime, timezone, timedelta
 import asyncio
@@ -313,15 +313,14 @@ def lst_modis_flow():
     region_id = str(flow_obj.region.id)
     flow_obj.close()
 
-    # Load zone geometries and source_id
+    # Load zone geometries and source_id using SQLAlchemy ORM
     db = SessionLocal()
-    zone_rows = db.execute(text("""
-        SELECT name, AsBinary(geometry) FROM zone_geometries WHERE region_id = :rid
-    """), {"rid": region_id}).fetchall()
-    zone_geoms = {name: wkb.loads(geom_wkb) for name, geom_wkb in zone_rows}
+    from db.models import ZoneGeometry, Source
+    zone_rows = db.query(ZoneGeometry).filter(ZoneGeometry.region_id == region_id).all()
+    zone_geoms = {z.name: to_shape(z.geometry) for z in zone_rows}
 
-    source_row = db.execute(text("SELECT id FROM sources WHERE key = 'modis_lst'")).fetchone()
-    src_id = str(source_row[0]) if source_row else None
+    source_row = db.query(Source).filter(Source.key == 'modis_lst').first()
+    src_id = str(source_row.id) if source_row else None
     db.close()
 
     if not zone_geoms:

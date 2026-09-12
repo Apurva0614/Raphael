@@ -35,12 +35,14 @@ def fetch_locations(bbox: tuple) -> list:
     return data.get("results", [])
 
 @task(name="fetch-openaq-measurements", retries=3)
-def fetch_measurements(location_id: int) -> list:
+def fetch_measurements(sensor_id: int) -> list:
     flow_obj = OpenAQFlow()
     headers  = {"X-API-Key": API_KEY} if API_KEY else {}
+    from datetime import datetime, timezone, timedelta
+    date_from = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
     data = flow_obj.fetch(
-        f"{BASE_URL}/measurements",
-        params={"location_id": location_id, "parameter": "pm25", "limit": 24},
+        f"{BASE_URL}/sensors/{sensor_id}/measurements",
+        params={"limit": 24, "datetime_from": date_from},
         headers=headers
     )
     return data.get("results", [])
@@ -48,14 +50,40 @@ def fetch_measurements(location_id: int) -> list:
 @task(name="write-openaq-to-db")
 def write_to_db(locations: list, flow_obj: OpenAQFlow):
     observations = []
+    
+    def get_measurement_time(m):
+        period = m.get("period") or {}
+        dt_utc = (period.get("end") or {}).get("utc") or (period.get("datetimeTo") or {}).get("utc")
+        return dt_utc
+
     for loc in locations:
         for sensor in loc.get("sensors", []):
-            latest = sensor.get("latest", {})
-            if not latest.get("value"):
+            sensor_id = sensor["id"]
+            measurements = fetch_measurements(sensor_id)
+            if not measurements:
                 continue
-            raw_data = dict(latest)
-            raw_data["lat"] = loc["coordinates"]["latitude"]
-            raw_data["lon"] = loc["coordinates"]["longitude"]
+                
+            valid_m = []
+            for m in measurements:
+                dt_str = get_measurement_time(m)
+                if dt_str and m.get("value") is not None:
+                    valid_m.append((dt_str, m))
+                    
+            if not valid_m:
+                continue
+                
+            valid_m.sort(key=lambda x: x[0])
+            newest_dt_str, newest_m = valid_m[-1]
+            
+            raw_data = {
+                "value": newest_m["value"],
+                "datetime": newest_dt_str,
+                "parameter": newest_m.get("parameter", {}).get("name"),
+                "unit": newest_m.get("parameter", {}).get("units") or "ug/m3",
+                "lat": loc["coordinates"]["latitude"],
+                "lon": loc["coordinates"]["longitude"]
+            }
+            
             observations.append({
                 "id":           uuid.uuid4(),
                 "source_id":    flow_obj.source.id,
@@ -65,15 +93,16 @@ def write_to_db(locations: list, flow_obj: OpenAQFlow):
                                     loc["coordinates"]["latitude"],
                                     loc["coordinates"]["longitude"]
                                 ),
-                "value":        float(latest["value"]),
-                "unit":         "ug/m3",
+                "value":        float(newest_m["value"]),
+                "unit":         raw_data["unit"],
                 "station_id":   str(loc["id"]),
                 "station_name": loc.get("name", ""),
                 "observed_at":  datetime.fromisoformat(
-                                    latest["datetime"].replace("Z", "+00:00")
-                                ) if latest.get("datetime") else datetime.now(timezone.utc),
+                                    newest_dt_str.replace("Z", "+00:00")
+                                ) if newest_dt_str else datetime.now(timezone.utc),
                 "raw_payload":  raw_data
             })
+            
     flow_obj.bulk_write(observations)
     flow_obj.update_source_sync_time()
     return len(observations)
@@ -85,9 +114,9 @@ def openaq_flow():
         print("No active region configured. Skipping.")
         return
 
-    bbox = flow_obj.db.execute(
-        "SELECT ST_MinX(bbox), ST_MinY(bbox), ST_MaxX(bbox), ST_MaxY(bbox) FROM regions WHERE is_active = true"
-    ).fetchone()
+    from db.queries import get_active_region_bbox
+    bbox = get_active_region_bbox(flow_obj.db)
+
 
     locations = fetch_locations(tuple(bbox))
     print(f"Found {len(locations)} OpenAQ stations")

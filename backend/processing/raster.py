@@ -17,6 +17,7 @@ Design:
 """
 
 import os
+os.environ.pop("PROJ_LIB", None)
 import uuid
 import numpy as np
 from pathlib import Path
@@ -375,36 +376,90 @@ def clip_to_bbox(src_path: Path, bbox: Tuple[float,float,float,float], dst_path:
 
     return dst_path
 
-
-def process_modis_lst(hdf_path: Path, bbox: Tuple, target_date: date) -> Optional[Path]:
+def process_modis_lst(hdf_path: Path, bbox: Tuple, target_date: date) -> Tuple:
     """
     Process a MODIS MOD11A1 HDF4 file into a colored PNG tile for the LST layer.
-    Falls back to mock generation if HDF4 driver is unavailable.
+    Falls back to mock generation if HDF4 driver and pyhdf are unavailable.
     """
-    if not HAS_HDF4 or not HAS_RASTERIO:
-        print(f"[raster] HDF4 driver not available (HAS_HDF4={HAS_HDF4}, HAS_RASTERIO={HAS_RASTERIO})")
-        print("[raster] Falling back to mock LST tile generation")
-        return generate_mock_lst_tile(bbox, target_date=target_date)
-
     try:
-        import subprocess
-        subdataset = f'HDF4_EOS:EOS_GRID:"{hdf_path}":MODIS_Grid_Daily_1km_LST:LST_Day_1km'
-        raw_tif    = hdf_path.parent / f"lst_raw_{target_date}.tif"
+        from pyhdf.SD import SD
+        has_pyhdf = True
+    except ImportError:
+        has_pyhdf = False
 
-        subprocess.run([
-            "gdal_translate", "-of", "GTiff", subdataset, str(raw_tif)
-        ], check=True, capture_output=True)
+    if not HAS_RASTERIO:
+        print("[raster] Rasterio not available")
+        return generate_mock_lst_tile(bbox, target_date=target_date), None, None, None
 
-        wgs_tif = hdf_path.parent / f"lst_wgs84_{target_date}.tif"
-        reproject_to_wgs84(raw_tif, wgs_tif)
+    if not HAS_HDF4 and not has_pyhdf:
+        print(f"[raster] Neither HDF4 driver nor pyhdf available.")
+        return generate_mock_lst_tile(bbox, target_date=target_date), None, None, None
 
-        clipped_tif = hdf_path.parent / f"lst_clipped_{target_date}.tif"
-        clip_to_bbox(wgs_tif, bbox, clipped_tif)
-
-        with rasterio.open(clipped_tif) as src:
-            data      = src.read(1).astype(float)
-            transform = src.transform
-            crs_val   = src.crs
+    raw_tif = None
+    wgs_tif = None
+    clipped_tif = None
+    try:
+        if HAS_HDF4:
+            import subprocess
+            subdataset = f'HDF4_EOS:EOS_GRID:"{hdf_path}":MODIS_Grid_Daily_1km_LST:LST_Day_1km'
+            raw_tif    = hdf_path.parent / f"lst_raw_{target_date}.tif"
+            subprocess.run([
+                "gdal_translate", "-of", "GTiff", subdataset, str(raw_tif)
+            ], check=True, capture_output=True)
+            
+            wgs_tif = hdf_path.parent / f"lst_wgs84_{target_date}.tif"
+            reproject_to_wgs84(raw_tif, wgs_tif)
+            
+            clipped_tif = hdf_path.parent / f"lst_clipped_{target_date}.tif"
+            clip_to_bbox(wgs_tif, bbox, clipped_tif)
+            
+            with rasterio.open(clipped_tif) as src:
+                data      = src.read(1).astype(float)
+                transform = src.transform
+                crs_val   = src.crs
+        else:
+            # Parse H and V from filename to calculate sinusoidal extent
+            import re
+            match = re.search(r"h(\d{2})v(\d{2})", hdf_path.name)
+            if not match:
+                raise ValueError("Could not parse MODIS tile h/v from filename")
+            h = int(match.group(1))
+            v = int(match.group(2))
+            
+            x_size = 20015109.354 * 2 / 36
+            y_size = 10007554.677 * 2 / 18
+            xmin = -20015109.354 + h * x_size
+            xmax = xmin + x_size
+            ymax = 10007554.677 - v * y_size
+            ymin = ymax - y_size
+            
+            # Read using pyhdf
+            from pyhdf.SD import SD
+            hdf = SD(str(hdf_path))
+            sds = hdf.select("LST_Day_1km")
+            sds_data = sds.get()
+            
+            raw_tif = hdf_path.parent / f"lst_raw_{target_date}.tif"
+            sinu_crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
+            transform_sinu = rasterio.transform.from_bounds(xmin, ymin, xmax, ymax, sds_data.shape[1], sds_data.shape[0])
+            
+            with rasterio.open(
+                raw_tif, "w", driver="GTiff",
+                height=sds_data.shape[0], width=sds_data.shape[1],
+                count=1, dtype=sds_data.dtype, crs=sinu_crs, transform=transform_sinu
+            ) as dst:
+                dst.write(sds_data, 1)
+                
+            wgs_tif = hdf_path.parent / f"lst_wgs84_{target_date}.tif"
+            reproject_to_wgs84(raw_tif, wgs_tif)
+            
+            clipped_tif = hdf_path.parent / f"lst_clipped_{target_date}.tif"
+            clip_to_bbox(wgs_tif, bbox, clipped_tif)
+            
+            with rasterio.open(clipped_tif) as src:
+                data      = src.read(1).astype(float)
+                transform = src.transform
+                crs_val   = src.crs
 
         # MODIS LST scale factor: multiply by 0.02, subtract 273.15 for Celsius
         data[data == 0] = np.nan
@@ -441,16 +496,20 @@ def process_modis_lst(hdf_path: Path, bbox: Tuple, target_date: date) -> Optiona
 
         # Cleanup temp files
         for tmp in [raw_tif, wgs_tif, clipped_tif]:
-            tmp.unlink(missing_ok=True)
+            if tmp:
+                tmp.unlink(missing_ok=True)
 
         print(f"[raster] LST tile written: {out_path}")
-        return out_path
+        return out_path, lst_celsius, transform, crs_val
 
     except Exception as e:
         print(f"[raster] LST real processing failed: {e}")
+        # Cleanup temp files if any
+        for tmp in [raw_tif, wgs_tif, clipped_tif]:
+            if tmp:
+                tmp.unlink(missing_ok=True)
         print("[raster] Falling back to mock LST tile generation")
-        return generate_mock_lst_tile(bbox, target_date=target_date)
-
+        return generate_mock_lst_tile(bbox, target_date=target_date), None, None, None
 
 def process_modis_ndvi(hdf_path: Path, bbox: Tuple, target_date: date) -> Optional[Path]:
     """
@@ -584,3 +643,102 @@ def get_tile_bounds_wkt(bounds: Tuple[float, float, float, float]) -> str:
         f"{west} {south}, {east} {south}, {east} {north}, "
         f"{west} {north}, {west} {south}))"
     )
+
+def extract_zonal_values(scaled_array: np.ndarray, transform, crs, zone_geoms: dict) -> dict:
+    """Extract zonal mean values from a raster array for each zone geometry."""
+    if not HAS_RASTERIO:
+        raise RuntimeError("rasterio not available for zonal extraction")
+    from shapely.geometry import mapping
+    import tempfile
+    
+    results = {}
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir) / "temp.tif"
+        with rasterio.open(
+            tmp_path, "w", driver="GTiff",
+            height=scaled_array.shape[0], width=scaled_array.shape[1],
+            count=1, dtype="float32", crs=crs, transform=transform
+        ) as dst:
+            dst.write(scaled_array.astype("float32"), 1)
+            
+        for name, geom in zone_geoms.items():
+            try:
+                with rasterio.open(tmp_path) as src:
+                    out_image, _ = rio_mask(src, [mapping(geom)], crop=True, nodata=np.nan)
+                    valid_vals = out_image[~np.isnan(out_image)]
+                    if len(valid_vals) > 0:
+                        results[name] = float(np.mean(valid_vals))
+                    else:
+                        results[name] = None
+            except Exception as e:
+                print(f"Error extracting zonal values for zone {name}: {e}")
+                results[name] = None
+    return results
+
+def generate_mock_zonal_values(layer_type: str, zone_geoms: dict) -> dict:
+    """Generate synthetic zonal values for testing/mock mode."""
+    import random
+    vals = {}
+    for name in zone_geoms.keys():
+        if layer_type == "lst":
+            vals[name] = random.uniform(28.0, 42.0)
+        else:
+            vals[name] = random.uniform(0.15, 0.65)
+    return vals
+
+def merge_zonal_values(*zonal_values_list) -> dict:
+    """Merge zonal values from multiple sources by averaging them."""
+    if not zonal_values_list:
+        return {}
+    keys = zonal_values_list[0].keys()
+    merged = {}
+    for k in keys:
+        vals = [zv[k] for zv in zonal_values_list if zv.get(k) is not None]
+        merged[k] = sum(vals) / len(vals) if vals else None
+    return merged
+
+def write_zonal_observations(db, region_id: str, layer_type: str, target_date, zonal_values: dict, src_id: str, raw_payload: dict = None) -> int:
+    """Write zonal observations to raw_observations table."""
+    from db.models import RawObservation, ZoneGeometry
+    import uuid
+    from datetime import datetime, timezone
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import Point
+    
+    count = 0
+    for zone_name, val in zonal_values.items():
+        if val is None:
+            continue
+            
+        zone_row = db.query(ZoneGeometry).filter(
+            ZoneGeometry.region_id == region_id,
+            ZoneGeometry.name == zone_name
+        ).first()
+        
+        if not zone_row:
+            continue
+            
+        from geoalchemy2.shape import to_shape
+        shape = to_shape(zone_row.geometry)
+        centroid = shape.centroid
+        point_geom = from_shape(Point(centroid.x, centroid.y), srid=4326)
+        
+        obs = RawObservation(
+            id=uuid.uuid4(),
+            source_id=src_id,
+            region_id=region_id,
+            layer_type=layer_type,
+            geometry=point_geom,
+            value=float(val),
+            unit="C" if layer_type == "lst" else "ndvi",
+            station_id=str(zone_row.id),
+            station_name=zone_name,
+            observed_at=datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc),
+            raw_payload=raw_payload or {}
+        )
+        db.add(obs)
+        count += 1
+        
+    db.commit()
+    return count
+
